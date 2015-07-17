@@ -2,75 +2,7 @@
 import sys
 import string
 from string import *
-
-# We need getch to properly implement "?"
-class _Getch(object):
-    """Gets a single character from standard input.  Does not echo to the
-screen."""
-    def __init__(self):
-        try:
-            self.impl = _GetchWindows()
-        except ImportError:
-            try:
-	        self.impl = _GetchUnix()
-            except ImportError:
-                self.impl = _GetchMacCarbon()
-
-    def __call__(self): return self.impl()
-
-
-class _GetchUnix(object):
-    def __init__(self):
-        import tty, sys, termios # import termios now or else you'll get the Unix version on the Mac
-
-    def __call__(self):
-        import sys, tty, termios
-        fd = sys.stdin.fileno()
-        old_settings = termios.tcgetattr(fd)
-        try:
-            tty.setraw(sys.stdin.fileno())
-            ch = sys.stdin.read(1)
-        finally:
-            termios.tcsetattr(fd, termios.TCSADRAIN, old_settings)
-        return ch
-
-class _GetchWindows(object):
-    def __init__(self):
-        import msvcrt
-
-    def __call__(self):
-        import msvcrt
-        return msvcrt.getch()
-
-
-class _GetchMacCarbon(object):
-	"""
-	A function which returns the current ASCII key that is down;
-	if no ASCII key is down, the null string is returned.  The
-	page http://www.mactech.com/macintosh-c/chap02-1.html was
-	very helpful in figuring out how to do this.  
-	"""
-	def __init__(self):
-		import Carbon
-		
-	def __call__(self):
-		import Carbon
-		if Carbon.Evt.EventAvail(0x0008)[0]==0: # 0x0008 is the keyDownMask
-			return ''
-		else:
-			#
-			# The event contains the following info:
-			# (what,msg,when,where,mod)=Carbon.Evt.GetNextEvent(0x0008)[1]
-			# 
-			# The message (msg) contains the ASCII char which is
-			# extracted with the 0x000000FF charCodeMask; this
-			# number is converted to an ASCII character with chr() and 
-			# returned
-			#
-			(what,msg,when,where,mod)=Carbon.Evt.GetNextEvent(0x0008)[1]
-			return chr(msg & 0x000000FF)
-
-getch = _Getch()
+from getch import getch
 
 class Point(object):
 	__slots__ = ('x','y')
@@ -95,35 +27,103 @@ class Point(object):
 		return Point( self.x + 1, self.y )
 	def w(self):
 		return Point( self.x - 1, self.y )
-
+	def __sub__(self, other):
+		return Point( self.x - other.x, self.y - other.y )
+	def __add__(self, other):
+		return Point( self.x + other.x, self.y + other.y )
 	def out_of_bounds(self):
 		return self.x < 0 or self.y < 0
 
 class Program(object):
 	def __init__(self, raw):
 		self.raw = raw
-
+		# breaking program into rafts
+		self.rafts = None
+		rafts = []
+		seen_space = True
+		for y in range(len(raw)):
+			for x in range(len(raw[y])):
+				if raw[y][x] in (0, 32):
+					seen_space = True
+				else:
+					seen_point = False
+					for raft in rafts:
+						if raft.contains( Point(x,y) ):
+							seen_point = True
+					if not seen_point:
+						rafts.append(Raft(self, Point(x,y)))
+					seen_space = False
+		self.rafts = rafts
+		
 	def get(self, point):
+		if self.rafts:
+			for raft in self.rafts:
+				if raft.contains( point ):
+					return raft.get( point )
+			return 0
 		if point.x < 0 or point.y < 0 or point.y >= len(self.raw) or point.x >= len( self.raw[point.y] ):
 			return 0
 		return self.raw[point.y][point.x]
 	def set(self, point, value):
-		if point.x < 0 or point.y < 0:
-			return
-		while point.y >= len( self.raw ):
-			self.raw.append([])
-		while point.x >= len( self.raw[point.y] ):
-			self.raw[point.y].append(0)
-		self.raw[point.y][point.x] = value
+		for raft in self.rafts:
+			if raft.contains( point ):
+				raft.set(point, value)
+				return
+		# self.rafts.append( Raft(self, None))
+
+	def remove( self, point ):
+		for raft in self.rafts:
+			if raft.contains( point ):
+				raft.remove( point )
+				break
+
+	def dump_program(self, formatted=False):
+		max_x = max( raft.lr.x for raft in self.rafts )
+		max_y = max( raft.lr.y for raft in self.rafts )
+		print max_x, max_y
+		for y in xrange(max_y):
+			linestring = "" 
+			for x in xrange(max_x):
+				
+				if x == cur_pos.x and y == cur_pos.y:
+					linestring += '@'
+				elif formatted:
+					xy_instr = chr(self.get( Point(x,y) ) or 32 )
+					if xy_instr in ('(', ')'):
+						linestring += '<font color="green">%s</font>' % xy_instr
+					elif xy_instr in ('[',']','~','_'):
+						linestring += '<font color="purple">%s</font>' % xy_instr
+					elif xy_instr in ('"','#','?'):
+						linestring += '<font color="blue">%s</font>' % xy_instr
+					elif xy_instr in ('^','v','<','>'):
+						if xy_instr == '<':
+							xy_instr = '&lt;'
+						elif xy_instr == '>':
+							xy_instr = '&gt;'
+						linestring += '<font color="orange">%s</font>' % xy_instr
+					elif xy_instr in ('a','s','d','f','h','j','k','l'):
+						linestring += '<font color="red">%s</font>' % xy_instr
+					elif xy_instr == '@':
+						linestring += '='
+					else:
+						linestring += xy_instr
+				else:
+					ch = chr( self.get( Point(x,y) ) or 32 )
+					linestring += ch if ch != '\n' else ' '
+				
+			print linestring.rstrip('\n')
+		print "*" * 20
+
+
+
 		
 class Raft(object):
 	def __init__(self,program,point):
-		#print "Starting with point", point
 		self.cur_dir = 'x'
-		self.points = []
+		self.points = [point]
 		visited = set()
 		unchecked = [point]
-			
+		
 		while unchecked:
 			point = unchecked.pop()
 			
@@ -140,12 +140,55 @@ class Raft(object):
 			unchecked.append( point.e() )
 			unchecked.append( point.w() )
 
+		# Compute bounding box
+		max_x = min_x = self.points[0].x
+		max_y = min_y = self.points[0].y
+		
+		for point in self.points:
+			if point.x > max_x:
+				max_x = point.x
+			elif point.x < min_x:
+				min_x = point.x
+
+			if point.y > max_y:
+				max_y = point.y
+			elif point.y < min_y:
+				min_y = point.y
+		self.ul = Point( min_x, min_y )
+		self.lr = Point( max_x, max_y )
+		self.points = dict((point - self.ul, program.get(point)) for point in self.points )
+
+	def __repr__(self):
+		return "Raft[({},{})-({},{})]".format( self.ul.x, self.ul.y, self.lr.x, self.lr.y )
+
+	def get(self, point):
+		return self.points.get( point - self.ul )
+	def set( self, point, value ):
+		self.points[point - self.ul] = value
+
+	def remove( self, point ):
+		point -= self.ul
+		del self.points[point]
+
 	@staticmethod
 	def _validLocation( value ):
 		return not value in (0, 32, ord('o'))
 
+	def contains(self, point):
+		point = point - self.ul
+		return point in self.points
+
+	def blocked(self, point):
+		point = point + self.ul
+		for raft in program.rafts:
+			if raft == self:
+				continue
+			if raft.contains( point ):
+				return True
+
 	def move(self):
-#		print "Moves:", str(self.points)
+		global cur_pos
+
 		offset, new_pos_func = { 
 			'n': ( Point(0,-1), lambda x: x.n() ),
 			's': ( Point(0,1), lambda x: x.s() ),
@@ -154,56 +197,16 @@ class Raft(object):
 			'x': ( Point(0,0), lambda x: x)
 			 }[self.cur_dir]
 		if self.cur_dir != 'x':
-			blocked = any( True for point in self.points 
-				if new_pos_func(point).out_of_bounds() or not 
-				(program.get(new_pos_func(point)) in (0,32) or new_pos_func(point) in self.points))
+			blocked = any( self.blocked(point + offset) for point in self.points )
 			if not blocked:
-				if cur_pos in self.points:
-					cur_pos.x += offset.x
-					cur_pos.y += offset.y
-				values = [ (new_pos_func(point), program.get(point)) for point in self.points ]
-				for point in self.points:
-					program.set( point, 32 )
-				for (point, value) in values:
-					program.set( point, value )
-				for point in self.points:
-					point.x += offset.x
-					point.y += offset.y
+				if self.contains( cur_pos ):
+					cur_pos += offset
+				self.ul += offset
+				self.lr += offset
+
 			else:
 				self.cur_dir = 'x'
 
-def dump_program(formatted=False):
-	for y in range(len(program.raw)):
-		linestring = "" 
-		for x in range(len(program.raw[y])):
-			if x == cur_pos.x and y == cur_pos.y:
-				linestring += '@'
-			elif formatted:
-				xy_instr = chr(program.raw[y][x])
-				if xy_instr in ('(', ')'):
-					linestring += '<font color="green">%s</font>' % xy_instr
-				elif xy_instr in ('[',']','~','_'):
-					linestring += '<font color="purple">%s</font>' % xy_instr
-				elif xy_instr in ('"','#','?'):
-					linestring += '<font color="blue">%s</font>' % xy_instr
-				elif xy_instr in ('^','v','<','>'):
-					if xy_instr == '<':
-						xy_instr = '&lt;'
-					elif xy_instr == '>':
-						xy_instr = '&gt;'
-					linestring += '<font color="orange">%s</font>' % xy_instr
-				elif xy_instr in ('a','s','d','f','h','j','k','l'):
-					linestring += '<font color="red">%s</font>' % xy_instr
-				elif xy_instr == '@':
-					linestring += '='
-				else:
-					linestring += xy_instr
-			else:
-				linestring += chr(program.raw[y][x])
-			
-		print rstrip(linestring)
-	print "*" * 20
-	
 def ns(x):
 	sys.stdout.softspace = 0
 	return x
@@ -226,24 +229,9 @@ for line in fp:
 
 memory = [0]
 mem_pos = 0
-# breaking program into rafts
-rafts = []
-seen_space = True
-for y in range(len(program)):
-	for x in range(len(program[y])):
-		if program[y][x] in (0, 32, ord('o')):
-			seen_space = True
-		else:
-			seen_point = False
-			for raft in rafts:
-				if Point(x,y) in raft.points:
-					seen_point = True
-			if not seen_point:
-				
-				rafts.append(Raft(Program( program ), Point(x,y)))
-			seen_space = False
 
 program = Program(program)
+program.set( cur_pos, ord('=') )
 # Start program execution
 while not program.get(cur_pos) in (32, 0):
 	instr = program.get(cur_pos)
@@ -269,7 +257,7 @@ while not program.get(cur_pos) in (32, 0):
 	elif instr == ord('#'):
 		print ns(memory[mem_pos]),
 	elif instr == ord('.'):
-		for raft in rafts:
+		for raft in program.rafts:
 			raft.move()
 	elif instr == ord('h'):
 		cur_dir = 'w'
@@ -371,58 +359,49 @@ while not program.get(cur_pos) in (32, 0):
 			scan_pos = Point( cur_pos.x, cur_pos.y-2)
 			while program.get(scan_pos) in (0, 32):
 				scan_pos = scan_pos.n()
-			program.set(scan_pos, 32)
-			for raft in rafts:
-				if scan_pos in raft.points:
-					raft.points.remove(scan_pos)
-		
+			program.remove(scan_pos)
+			
 		if program.get(cur_pos.s()) in (ord('d'), ord('k')):
 			scan_pos = Point(cur_pos.x,cur_pos.y+2)
 			while program.get(scan_pos) in (0, 32):
 				scan_pos = scan_pos.s()
-			program.set(scan_pos, 32)
-	
+			program.remove(scan_pos)
+			
 		if program.get(cur_pos.w()) in (ord('a'), ord('h')):
 			scan_pos = Point(cur_pos.x-2,cur_pos.y)
 			while program.get(scan_pos) in (0, 32):
 				scan_pos = scan_pos.w()
-			program.set(scan_pos, 32)
-			for raft in rafts:
-				if scan_pos in raft.points:
-					raft.points.remove(scan_pos)
-		
+			program.remove(scan_pos)
+			
 		if program.get(cur_pos.e()) in (ord('f'), ord('l')):
 			scan_pos = Point(cur_pos.x+2,cur_pos.y)
 			while program.get(scan_pos) in (0, 32):
 				scan_pos = scan_pos.e()
-			program.set(scan_pos, 32)
-			for raft in rafts:
-				if scan_pos in raft.points:
-					raft.points.remove(scan_pos)
-	
+			program.remove(scan_pos)
+		
 	elif instr == ord('a'):
-		for raft in rafts:
-			if cur_pos in raft.points:
+		for raft in program.rafts:
+			if raft.contains( cur_pos ):
 				raft.cur_dir = 'w'
 				break
 	elif instr == ord('f'):
-		for raft in rafts:
-			if cur_pos in raft.points:
+		for raft in program.rafts:
+			if raft.contains( cur_pos ):
 				raft.cur_dir = 'e'
 				break
 	elif instr == ord('s'):
-		for raft in rafts:
-			if cur_pos in raft.points:
+		for raft in program.rafts:
+			if raft.contains( cur_pos ):
 				raft.cur_dir = 'n'
 				break
 	elif instr == ord('d'):
-		for raft in rafts:
-			if cur_pos in raft.points:
+		for raft in program.rafts:
+			if raft.contains( cur_pos ):
 				raft.cur_dir = 's'
 				break
 	elif instr == ord('x'):
-		for raft in rafts:
-			if cur_pos in raft.points:
+		for raft in program.rafts:
+			if raft.contains( cur_pos ):
 				raft.cur_dir = 'x'
 				break
 			
@@ -434,8 +413,8 @@ while not program.get(cur_pos) in (32, 0):
 		cur_pos = cur_pos.s()
 	elif cur_dir == 'w':
 		cur_pos = cur_pos.w()
-	for raft in rafts:
+	for raft in program.rafts:
 		raft.move()
-#	continue
-	# dump_program()
-#dump_program(True)
+
+program.dump_program()
+print cur_pos
