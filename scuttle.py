@@ -43,7 +43,7 @@ class Program(object):
 		seen_space = True
 		for y in range(len(raw)):
 			for x in range(len(raw[y])):
-				if raw[y][x] in (0, 32):
+				if raw[y][x] in (0, 10, 13, 32):
 					seen_space = True
 				else:
 					seen_point = False
@@ -52,6 +52,7 @@ class Program(object):
 							seen_point = True
 					if not seen_point:
 						rafts.append(Raft(self, Point(x,y)))
+					
 					seen_space = False
 		self.rafts = rafts
 		
@@ -77,13 +78,20 @@ class Program(object):
 				raft.remove( point )
 				break
 
-	def dump_program(self, formatted=False):
+	def inbounds( self, point ):
+		min_x = min( raft.ul.x for raft in self.rafts )
+		min_y = min( raft.ul.y for raft in self.rafts )
 		max_x = max( raft.lr.x for raft in self.rafts )
 		max_y = max( raft.lr.y for raft in self.rafts )
-		print max_x, max_y
-		for y in xrange(max_y):
+		return min_x <= point.x <= max_x and min_y <= point.y <= max_y
+
+	def dump_program(self, formatted=False):
+		max_x = max( cur_pos.x, max( raft.lr.x for raft in self.rafts ) )
+		max_y = max( cur_pos.y, max( raft.lr.y for raft in self.rafts ) )
+
+		for y in xrange(max_y + 1):
 			linestring = "" 
-			for x in xrange(max_x):
+			for x in xrange(max_x + 1):
 				
 				if x == cur_pos.x and y == cur_pos.y:
 					linestring += '@'
@@ -178,13 +186,32 @@ class Raft(object):
 		point = point - self.ul
 		return point in self.points
 
-	def blocked(self, point):
-		point = point + self.ul
+
+	def blockedmoving(self, offset):
+		newul = self.ul + offset
+		newlr = self.lr + offset
 		for raft in program.rafts:
 			if raft == self:
 				continue
-			if raft.contains( point ):
-				return True
+			if raft.ul.x > newlr.x or raft.lr.x < newul.x or raft.ul.y > newlr.y or raft.lr.y < newul.y:
+				continue
+			hit = any( raft.contains( point + newul ) for point in self.points )
+			if hit:
+				return hit
+		return False
+	
+	def render(self):
+		size = self.lr - self.ul
+		
+		for y in xrange(size.y+1):
+			sys.stdout.write("\n|")
+			for x in xrange(size.x+1):
+				p = Point(x,y)
+				if p in self.points:
+					sys.stdout.write(chr(self.points[p]))
+				else:
+					sys.stdout.write(" ")
+		sys.stdout.write("\n")
 
 	def move(self):
 		global cur_pos
@@ -197,7 +224,7 @@ class Raft(object):
 			'x': ( Point(0,0), lambda x: x)
 			 }[self.cur_dir]
 		if self.cur_dir != 'x':
-			blocked = any( self.blocked(point + offset) for point in self.points )
+			blocked = self.blockedmoving( offset )
 			if not blocked:
 				if self.contains( cur_pos ):
 					cur_pos += offset
@@ -212,7 +239,10 @@ def ns(x):
 	return x
 
 def hextoint(c):
-	return int(c,16)
+	try:
+		return int(c,16)
+	except ValueError:
+		return 0
 
 fname = sys.argv[1]
 fp = open(fname, 'r')
@@ -222,7 +252,7 @@ cur_pos = Point(0,0)
 for line in fp:
 	if line.find('@') >= 0:
 		cur_pos = Point(line.find('@'), len(program))
-	l_line = [ord(c) for c in line if not c in (10, 13)]
+	l_line = [ord(c) for c in line if not c in "\r\n"]
 	if len(l_line) < 80:
 		l_line += [32] * (80 - len(l_line))
 	program.append(l_line)
@@ -321,21 +351,15 @@ while not program.get(cur_pos) in (32, 0):
 		else:
 			heading = 1
 		cur_pos.x += heading
-		try:
-			while program.get( cur_pos ) != ord(']'):
-				cur_pos.x += heading
-		except:
-			print "Could not find matching point for ["
-			dump_program()
-			print cur_pos
-			sys.exit()
+		while program.get( cur_pos ) != ord(']') and program.inbounds(cur_pos):
+			cur_pos.x += heading
 	elif instr == ord(']'):
 		if memory[mem_pos] == 0:
 			heading = -1
 		else:
 			heading = 1
 		cur_pos.x -= heading
-		while program.get(cur_pos) != ord('['):
+		while program.get(cur_pos) != ord('[') and program.inbounds(scan_pos):
 			cur_pos.x -= heading
 	elif instr == ord('~'):
 		if memory[mem_pos] == 0:
@@ -343,7 +367,7 @@ while not program.get(cur_pos) in (32, 0):
 		else:
 			heading = 1
 		cur_pos.y += heading
-		while program.get(cur_pos) != ord('_'):
+		while program.get(cur_pos) != ord('_') and program.inbounds(scan_pos):
 			cur_pos.y += heading
 	elif instr == ord('_'):
 		if memory[mem_pos] == 0:
@@ -351,31 +375,31 @@ while not program.get(cur_pos) in (32, 0):
 		else:
 			heading = 1
 		cur_pos.y -= heading
-		while program.get(cur_pos) != ord('~'):
+		while program.get(cur_pos) != ord('~') and program.inbounds(scan_pos):
 			cur_pos.y -= heading
 	elif instr == ord('$'):
 		
 		if program.get(cur_pos.n()) in (ord('s'), ord('j')):
 			scan_pos = Point( cur_pos.x, cur_pos.y-2)
-			while program.get(scan_pos) in (0, 32):
+			while program.get(scan_pos) in (0, 32) and program.inbounds(scan_pos):
 				scan_pos = scan_pos.n()
 			program.remove(scan_pos)
 			
 		if program.get(cur_pos.s()) in (ord('d'), ord('k')):
 			scan_pos = Point(cur_pos.x,cur_pos.y+2)
-			while program.get(scan_pos) in (0, 32):
+			while program.get(scan_pos) in (0, 32) and program.inbounds(scan_pos):
 				scan_pos = scan_pos.s()
 			program.remove(scan_pos)
 			
 		if program.get(cur_pos.w()) in (ord('a'), ord('h')):
 			scan_pos = Point(cur_pos.x-2,cur_pos.y)
-			while program.get(scan_pos) in (0, 32):
+			while program.get(scan_pos) in (0, 32) and program.inbounds(scan_pos):
 				scan_pos = scan_pos.w()
 			program.remove(scan_pos)
 			
 		if program.get(cur_pos.e()) in (ord('f'), ord('l')):
 			scan_pos = Point(cur_pos.x+2,cur_pos.y)
-			while program.get(scan_pos) in (0, 32):
+			while program.get(scan_pos) in (0, 32) and program.inbounds(scan_pos):
 				scan_pos = scan_pos.e()
 			program.remove(scan_pos)
 		
