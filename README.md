@@ -1,11 +1,11 @@
-#Scuttle - A Fungeoid With Moving Parts
-##What is Scuttle?
+# Scuttle - A Fungeoid With Moving Parts
+## What is Scuttle?
 
 Scuttle is one of those esoteric programming languages, whose purpose is less to make useful programs, but rather to make people (or at least programmers) shudder with horror and question the sanity of the author.
 
 In 2005, I'd been reading about various esoteric languages and thought I'd try my hand at one of my own. I admired Befunge's style and Brainfuck's simplicity, and so decided to make one based on the two. As an added twist, I decided that pieces of code should be able to move, or scuttle about. I started writing the spec, and decided that the code should be self modifying as well, beyond movement. So far I've implemented only one of the 4 or so code manipulation instructions.
 
-##So what can I do with Scuttle?
+## So what can I do with Scuttle?
 
 In theory, everything that you can do with a Turing machine since the language supports all of Brainfuck's instructions with only two variations. Like Brainfuck (and unlike Befunge), Scuttle uses an array of memory. Like Befunge (and unlike Brainfuck) program execution can flow in any direction. Code is divided into blocks called rafts, which can move independently of each other. Once set into motion, the raft will continue moving until it either hits another raft, is told to stop, or hits the edge of the program.
 
@@ -35,5 +35,5 @@ The instruction set is as follows:
 
 !, >, >, ^, v and # were added mostly for convenience once I started writing the sample code. Purists can feel free to ignore them.
 
-##Where can I find some Scuttle code, and how does it work?
+## Where can I find some Scuttle code, and how does it work?
 See helloworld.sct and 99bottles.sct for code, and helloworld.md and 99bottles.md for explanations of execution.
